@@ -1,39 +1,49 @@
 (ns qrawl.core
-  (:require [clojure.core.async :as async :refer [go go-loop >! <! chan]]))
+  (:require [clojure.core.async :as async :refer [go >! >!! <! chan]]
+            [net.cgrand.enlive-html :as html]))
+
+(def WORKER-COUNT 100)
 
 (def link-queue (chan 10000))
-(def work-queue (chan 10))
+(def work-queue (chan WORKER-COUNT))
 
-(defn load-urls
+(defn fetch-url [url]
+  (html/html-resource (java.net.URL. url)))
+
+(defn- load-urls
   [urls]
   (go
     (doseq [url urls]
       (>! link-queue url))))
+
+(defn terminate
+  [urls]
+  (load-urls urls)
+  (>!! work-queue true))
+
+(defn- run-handler
+  [handler url]
+  (try 
+    (let [html (fetch-url url)]
+      (handler html))
+
+    (catch Exception e
+      (println e)
+      (terminate []))))
 
 (defn crawl
   "Crawls urls, executing handler on each page.
   
   handler should return a vector of URLs that will
   continuously be fed into consumers that execute handler"
-  [urls handler]
+  [handler url]
 
-  (load-urls urls)
-
-  (go (doseq [x (range 1000)]
-    (>! work-queue [x])))
+  (>!! link-queue url)
+  (doseq [x (range WORKER-COUNT)]
+    (>!! work-queue true))
 
   (go
     (while true
-      (let [result-set (<! work-queue)] ;; limits workers
-        (load-urls result-set)
-        (go (handler (<! link-queue)))))))
-
-
-(defn x [y]
-  (println "got" y)
-  (Thread/sleep (rand-int 1000))
-  (go (>! work-queue [:a :b :c :d :e :f])))
-
-(crawl ["asd" "qwe"] x)
-
+      (<! work-queue) ;; limits workers
+      (go (run-handler handler (<! link-queue))))))
 
