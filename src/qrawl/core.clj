@@ -12,9 +12,8 @@
 
 (defn- load-urls
   [urls]
-  (go
-    (doseq [url urls]
-      (>! link-queue url))))
+  (doseq [url urls]
+    (>!! link-queue url)))
 
 (defn terminate
   [urls]
